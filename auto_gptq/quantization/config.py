@@ -108,7 +108,9 @@ class BaseQuantizeConfig(PushToHubMixin):
             if checkpoint_format not in valid_formats:
                 raise ValueError(f"Unknown quantization checkpoint format: {checkpoint_format}.")
             if quantize_cfg.get(CHECKPOINT_FORMAT_FIELD):
-                raise ValueError("Conflict: quantization checkpoint_format is passed in and also exists in model config.")
+                raise ValueError(
+                    "Conflict: quantization checkpoint_format is passed in and also exists in model config."
+                )
         # compat: warn if checkpoint_format is missing
         elif quantize_cfg.get(CHECKPOINT_FORMAT_FIELD) is None:
             checkpoint_format_auto_inferred = True
@@ -161,10 +163,7 @@ class BaseQuantizeConfig(PushToHubMixin):
                 f"`checkpoint_format` is missing from the quantization configuration and is automatically inferred to {normalized[CHECKPOINT_FORMAT_FIELD]}."
             )
 
-        if normalized[CHECKPOINT_FORMAT_FIELD] in {
-            CHECKPOINT_FORMAT.AWQ_GEMM,
-            CHECKPOINT_FORMAT.MARLIN,
-        }:
+        if normalized[CHECKPOINT_FORMAT_FIELD] in {CHECKPOINT_FORMAT.AWQ_GEMM, CHECKPOINT_FORMAT.MARLIN}:
             # AWQ and Marlin do not reorder the rows.
             normalized["desc_act"] = False
 
@@ -192,7 +191,7 @@ class BaseQuantizeConfig(PushToHubMixin):
 
         transformers_config = False
         for quantize_config_filename in [
-            "config.json",
+            "config.json",  # TODO: Remove this change
             QUANT_CONFIG_FILENAME,
             "quant_config.json",
         ]:

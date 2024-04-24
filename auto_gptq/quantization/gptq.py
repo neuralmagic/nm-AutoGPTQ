@@ -17,7 +17,6 @@ torch.backends.cudnn.allow_tf32 = False
 
 
 class GPTQ:
-
     def __init__(self, layer):
         self.layer = layer
         self.dev = self.layer.weight.device
@@ -39,8 +38,7 @@ class GPTQ:
         if len(inp.shape) == 2:
             inp = inp.unsqueeze(0)
         tmp = inp.shape[0]
-        if isinstance(self.layer, nn.Linear) or isinstance(
-                self.layer, transformers.Conv1D):
+        if isinstance(self.layer, nn.Linear) or isinstance(self.layer, transformers.Conv1D):
             if len(inp.shape) == 3:
                 inp = inp.reshape((-1, inp.shape[-1]))
             inp = inp.t()
@@ -61,18 +59,13 @@ class GPTQ:
         # self.H += 2 / self.nsamples * inp.matmul(inp.t())
         self.H += inp.matmul(inp.t())
 
-    def fasterquant(self,
-                    blocksize=128,
-                    percdamp=0.01,
-                    group_size=-1,
-                    actorder=False,
-                    static_groups=False,
-                    preserve_zeros=False):
+    def fasterquant(
+        self, blocksize=128, percdamp=0.01, group_size=-1, actorder=False, static_groups=False, preserve_zeros=False
+    ):
         # A way to force preserve zeros
         if not preserve_zeros:
             env_preserve_zeros = "AUTOGPTQ_PRESERVE_ZEROS"
-            if env_preserve_zeros in os.environ and os.environ[
-                    env_preserve_zeros] == "1":
+            if env_preserve_zeros in os.environ and os.environ[env_preserve_zeros] == "1":
                 preserve_zeros = True
 
         W = self.layer.weight.data.clone()
@@ -107,7 +100,7 @@ class GPTQ:
             groups = []
             for i in range(0, self.columns, group_size):
                 quantizer = copy.deepcopy(self.quantizer)
-                quantizer.find_params(W[:, i:(i + group_size)], weight=True)
+                quantizer.find_params(W[:, i : (i + group_size)], weight=True)
                 scale.append(quantizer.scale)
                 zero.append(quantizer.zero)
                 groups.append(quantizer)
@@ -149,9 +142,7 @@ class GPTQ:
                 if group_size != -1:
                     if not static_groups:
                         if (i1 + i) % group_size == 0:
-                            self.quantizer.find_params(
-                                W[:, (i1 + i):(i1 + i + group_size)],
-                                weight=True)
+                            self.quantizer.find_params(W[:, (i1 + i) : (i1 + i + group_size)], weight=True)
 
                         if ((i1 + i) // group_size) - now_idx == -1:
                             scale.append(self.quantizer.scale)
@@ -165,7 +156,7 @@ class GPTQ:
 
                 q = self.quantizer.quantize(w.unsqueeze(1)).flatten()
                 Q1[:, i] = q
-                Losses1[:, i] = (w - q)**2 / d**2
+                Losses1[:, i] = (w - q) ** 2 / d**2
 
                 err1 = (w - q) / d
 
@@ -189,7 +180,7 @@ class GPTQ:
             if os.environ.get("DEBUG"):
                 self.layer.weight.data[:, :i2] = Q[:, :i2]
                 self.layer.weight.data[:, i2:] = W[:, i2:]
-                logger.debug(torch.sum((self.layer(self.inp1) - self.out1)**2))
+                logger.debug(torch.sum((self.layer(self.inp1) - self.out1) ** 2))
                 logger.debug(torch.sum(Losses))
 
         torch.cuda.synchronize()
@@ -208,10 +199,9 @@ class GPTQ:
 
         if isinstance(self.layer, transformers.Conv1D):
             Q = Q.t()
-        self.layer.weight.data = Q.reshape(self.layer.weight.shape).type_as(
-            self.layer.weight.data)
+        self.layer.weight.data = Q.reshape(self.layer.weight.shape).type_as(self.layer.weight.data)
         if os.environ.get("DEBUG"):
-            logger.debug(torch.sum((self.layer(self.inp1) - self.out1)**2))
+            logger.debug(torch.sum((self.layer(self.inp1) - self.out1) ** 2))
 
         if scale == []:
             scale.append(self.quantizer.scale)
