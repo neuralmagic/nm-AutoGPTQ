@@ -6,20 +6,32 @@ import torch
 from ._semi_structured_conversions import sparse_semi_structured_from_dense_cutlass
 
 
-def _get_perms_2_4():
+def _get_perms_2_4(num_bits):
     perm = []
     for i in range(32):
         perm1 = []
         col = i // 4
         col_o = col // 2
         for block in [0, 1]:
-            for row in [2 * (i % 4), 2 * (i % 4) + 1, 2 * (i % 4 + 4), 2 * (i % 4 + 4) + 1]:
+            for row in [
+                2 * (i % 4),
+                2 * (i % 4) + 1,
+                2 * (i % 4 + 4),
+                2 * (i % 4 + 4) + 1,
+            ]:
                 perm1.append(16 * row + col_o * 256 + 8 * (col % 2) + 4 * block)
         for j in range(4):
             perm.extend([p + 1 * j for p in perm1])
     perm = np.array(perm)
-    interleave = np.array([0, 2, 4, 6, 1, 3, 5, 7])
-    perm = perm.reshape((-1, 8))[:, interleave].ravel()
+
+    if num_bits == 4:
+        interleave = np.array([0, 2, 4, 6, 1, 3, 5, 7])
+    elif num_bits == 8:
+        interleave = np.array([0, 2, 1, 3])
+    else:
+        raise ValueError("num_bits must be 4 or 8, got {}".format(num_bits))
+
+    perm = perm.reshape((-1, len(interleave)))[:, interleave].ravel()
     perm = torch.from_numpy(perm)
     scale_perm = []
     for i in range(8):
@@ -30,7 +42,14 @@ def _get_perms_2_4():
     return perm, scale_perm, scale_perm_single
 
 
-_perm_2_4, _scale_perm_2_4, _scale_perm_single_2_4 = _get_perms_2_4()
+_perm_2_4 = {}
+_scale_perm_2_4 = {}
+_scale_perm_single_2_4 = {}
+for num_bits in [4, 8]:
+    perm_2_4, scale_perm_2_4, scale_perm_single_2_4 = _get_perms_2_4(num_bits)
+    _perm_2_4[num_bits] = perm_2_4
+    _scale_perm_2_4[num_bits] = scale_perm_2_4
+    _scale_perm_single_2_4[num_bits] = scale_perm_single_2_4
 
 
 def unpack_gptq(w_gptq, size_k, size_n, num_bits):
@@ -43,10 +62,11 @@ def unpack_gptq(w_gptq, size_k, size_n, num_bits):
     res = np.zeros((size_k, size_n), dtype=np.uint32)
     w_gptq_cpu = w_gptq.cpu().numpy().astype(np.uint32)
 
+    mask = (1 << num_bits) - 1
     for i in range(pack_factor):
-        vals = w_gptq_cpu & 0xF
-        w_gptq_cpu >>= 4
-        res[i::8, :] = vals
+        vals = w_gptq_cpu & mask
+        w_gptq_cpu >>= num_bits
+        res[i::pack_factor, :] = vals
 
     res = torch.from_numpy(res.astype(np.int32)).to(w_gptq.device)
 
@@ -106,7 +126,7 @@ def compress_24(w):
 
 
 def quant(w, s, size_k, size_n, num_bits, group_size):
-    max_q_val = 2**num_bits - 1
+    max_q_val = (1 << num_bits) - 1
     half_q_val = (max_q_val + 1) // 2
 
     # Reshape to [groupsize, -1]
@@ -151,7 +171,8 @@ def check_24(w, num_rows_to_sample=50, _verbose=False):
 
 
 def repack_gptq_to_marlin_24(w_gptq, scales, size_k, size_n, num_bits, group_size, marlin_tile=16):
-    assert num_bits == 4
+    assert num_bits == 4 or num_bits == 8
+    pack_factor = 32 // num_bits
 
     if group_size == -1:
         group_size = size_k
@@ -190,13 +211,13 @@ def repack_gptq_to_marlin_24(w_gptq, scales, size_k, size_n, num_bits, group_siz
     q_w = q_w.reshape((size_k_comp // marlin_tile, size_n * marlin_tile))
 
     res = q_w
-    res = res.reshape((-1, _perm_2_4.numel()))[:, _perm_2_4].reshape(res.shape)
+    res = res.reshape((-1, _perm_2_4[num_bits].numel()))[:, _perm_2_4[num_bits]].reshape(res.shape)
 
     # Pack
-    q = np.zeros((res.shape[0], res.shape[1] // 8), dtype=np.uint32)
+    q = np.zeros((res.shape[0], res.shape[1] // pack_factor), dtype=np.uint32)
     res = res.cpu().numpy().astype(np.uint32)
-    for i in range(8):
-        q |= res[:, i::8] << 4 * i
+    for i in range(pack_factor):
+        q |= res[:, i::pack_factor] << num_bits * i
 
     q = torch.from_numpy(q.astype(np.int32)).to(w_gptq.device)
     print("    q: shape = {} type = {}".format(q.shape, q.type()))
@@ -204,14 +225,14 @@ def repack_gptq_to_marlin_24(w_gptq, scales, size_k, size_n, num_bits, group_siz
     return q, meta, w
 
 
-def repack_scales_to_marlin_24(s, group_size, size_k, size_n):
+def repack_scales_to_marlin_24(s, num_bits, group_size, size_k, size_n):
     if group_size == -1:
         group_size = size_k
 
     if group_size != size_k:
-        s = s.reshape((-1, len(_scale_perm_2_4)))[:, _scale_perm_2_4]
+        s = s.reshape((-1, len(_scale_perm_2_4[num_bits])))[:, _scale_perm_2_4[num_bits]]
     else:
-        s = s.reshape((-1, len(_scale_perm_single_2_4)))[:, _scale_perm_single_2_4]
+        s = s.reshape((-1, len(_scale_perm_single_2_4[num_bits])))[:, _scale_perm_single_2_4[num_bits]]
     s = s.reshape((-1, size_n)).contiguous()
 
     return s

@@ -118,8 +118,8 @@ def _validate_marlin_device_support() -> Tuple[bool, bool]:
 def _validate_marlin_compatibility(cfg: BaseQuantizeConfig):
     if not MARLIN_AVAILABLE:
         return f"AutoGPTQ is not compiled with the Marlin kernel, with the following error: {MARLIN_EXCEPTION}"
-    if cfg.bits != 4:
-        return f"The quantized model uses a bitwidth different than 4 (found {cfg.bits})"
+    if cfg.bits != 4 and cfg.bits != 8:
+        return f"The quantized model uses a bitwidth different than 4 or 8 (found {cfg.bits})"
     if cfg.group_size != 128 and cfg.group_size != -1:
         return "The quantized model uses a group size that is not 128 or -1 (found quantization_config.group_size)"
     if not cfg.sym:
@@ -244,7 +244,7 @@ def convert_to_marlin_24(
         # loading weights from checkpoints holding zero bias.
         with torch.device("meta"):
             new_module = MarlinQuantLinear(
-                bits=4,
+                bits=quantization_config.bits,
                 group_size=module.group_size,
                 infeatures=module.infeatures,
                 outfeatures=module.outfeatures,
@@ -277,7 +277,7 @@ def convert_to_marlin_24(
                     )
 
             marlin_24_scales = repack_scales_to_marlin_24(
-                module.scales, module.group_size / 2, module.infeatures, module.outfeatures
+                module.scales, quantization_config.bits, module.group_size / 2, module.infeatures, module.outfeatures
             )
 
             new_module.B_24 = marlin_24_weight
