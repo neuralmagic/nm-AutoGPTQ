@@ -713,6 +713,7 @@ os.environ['NUMEXPR_MAX_THREADS'] = max_threads
         use_triton: bool = False,
         use_qigen: bool = False,
         use_marlin: bool = False,
+        use_marlin_24: bool = False,
         torch_dtype: Optional[torch.dtype] = None,
         inject_fused_attention: bool = False,
         inject_fused_mlp: bool = False,
@@ -829,6 +830,9 @@ os.environ['NUMEXPR_MAX_THREADS'] = max_threads
             if not isinstance(quantize_config, BaseQuantizeConfig):
                 quantize_config = BaseQuantizeConfig.from_quant_config(quantize_config, checkpoint_format)
 
+        if use_marlin_24:
+            use_marlin = True
+        
         if quantize_config.checkpoint_format == CHECKPOINT_FORMAT.MARLIN:
             # format marlin requires marlin kernel
             use_marlin = True
@@ -1121,6 +1125,7 @@ os.environ['NUMEXPR_MAX_THREADS'] = max_threads
                     torch_dtype=torch_dtype,
                     current_model_save_name=model_save_name,
                     device_map=device_map,
+                    is_24=use_marlin_24
                 )
 
                 # Disable incompatible optimizations.

@@ -27,6 +27,7 @@ QUANT_CONFIG_FILENAME = "quantize_config.json"
 class CHECKPOINT_FORMAT:
     GPTQ = "gptq"
     MARLIN = "marlin"
+    MARLIN_24 = "marlin_24"
     AWQ_GEMM = "gemm"
 
 
@@ -40,10 +41,9 @@ QUANT_METHOD_FORMAT_MAPPING = {
     QUANT_METHOD.GPTQ: {
         CHECKPOINT_FORMAT.GPTQ,
         CHECKPOINT_FORMAT.MARLIN,
+        CHECKPOINT_FORMAT.MARLIN_24,
     },
-    QUANT_METHOD.AWQ: {
-        CHECKPOINT_FORMAT.AWQ_GEMM
-    }
+    QUANT_METHOD.AWQ: {CHECKPOINT_FORMAT.AWQ_GEMM},
 }
 
 # awq is inference only
@@ -81,7 +81,8 @@ class BaseQuantizeConfig(PushToHubMixin):
         if self.checkpoint_format not in valid_checkpoint_formats:
             raise ValueError(
                 f"The checkpoint format used is {self.checkpoint_format}, and the quantization method is {self.quant_method}. "
-                f"This is not supported, please open an issue at https://github.com/AutoGPTQ/AutoGPTQ/issues.")
+                f"This is not supported, please open an issue at https://github.com/AutoGPTQ/AutoGPTQ/issues."
+            )
 
         if self.bits not in fields_info[0].metadata["choices"]:
             raise ValueError(f"only support quantize to {fields_info[0].metadata['choices']} bits.")
@@ -93,7 +94,7 @@ class BaseQuantizeConfig(PushToHubMixin):
             raise ValueError("damp_percent must between 0 and 1.")
 
     def save_pretrained(self, save_dir: str, **kwargs):
-        with open(join(save_dir,  QUANT_CONFIG_FILENAME), "w", encoding="utf-8") as f:
+        with open(join(save_dir, QUANT_CONFIG_FILENAME), "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
@@ -107,14 +108,19 @@ class BaseQuantizeConfig(PushToHubMixin):
             if checkpoint_format not in valid_formats:
                 raise ValueError(f"Unknown quantization checkpoint format: {checkpoint_format}.")
             if quantize_cfg.get(CHECKPOINT_FORMAT_FIELD):
-                raise ValueError("Conflict: quantization checkpoint_format is passed in and also exists in model config.")
+                raise ValueError(
+                    "Conflict: quantization checkpoint_format is passed in and also exists in model config."
+                )
         # compat: warn if checkpoint_format is missing
         elif quantize_cfg.get(CHECKPOINT_FORMAT_FIELD) is None:
             checkpoint_format_auto_inferred = True
 
         field_names = [field.name for field in fields(cls)]
 
-        normalized = {QUANT_METHOD_FIELD: QUANT_METHOD.GPTQ, CHECKPOINT_FORMAT_FIELD: checkpoint_format if checkpoint_format else CHECKPOINT_FORMAT.GPTQ}
+        normalized = {
+            QUANT_METHOD_FIELD: QUANT_METHOD.GPTQ,
+            CHECKPOINT_FORMAT_FIELD: (checkpoint_format if checkpoint_format else CHECKPOINT_FORMAT.GPTQ),
+        }
         for key, val in quantize_cfg.items():
             key = key.lower()
 
@@ -125,7 +131,11 @@ class BaseQuantizeConfig(PushToHubMixin):
             if key == CHECKPOINT_FORMAT_FIELD:
                 val = val.lower()
 
-                if val in {CHECKPOINT_FORMAT.GPTQ, CHECKPOINT_FORMAT.MARLIN, CHECKPOINT_FORMAT.AWQ_GEMM}:
+                if val in {
+                    CHECKPOINT_FORMAT.GPTQ,
+                    CHECKPOINT_FORMAT.MARLIN,
+                    CHECKPOINT_FORMAT.AWQ_GEMM,
+                }:
                     normalized[key] = val
                 else:
                     raise ValueError(f"Unknown quantization format: {val}.")
@@ -149,7 +159,9 @@ class BaseQuantizeConfig(PushToHubMixin):
                 logger.info(f"Ignoring unknown parameter in the quantization configuration: {key}.")
 
         if checkpoint_format_auto_inferred:
-            logger.info(f"`checkpoint_format` is missing from the quantization configuration and is automatically inferred to {normalized[CHECKPOINT_FORMAT_FIELD]}.")
+            logger.info(
+                f"`checkpoint_format` is missing from the quantization configuration and is automatically inferred to {normalized[CHECKPOINT_FORMAT_FIELD]}."
+            )
 
         if normalized[CHECKPOINT_FORMAT_FIELD] in {CHECKPOINT_FORMAT.AWQ_GEMM, CHECKPOINT_FORMAT.MARLIN}:
             # AWQ and Marlin do not reorder the rows.
@@ -179,9 +191,9 @@ class BaseQuantizeConfig(PushToHubMixin):
 
         transformers_config = False
         for quantize_config_filename in [
+            "config.json",  # TODO: Remove this change
             QUANT_CONFIG_FILENAME,
             "quant_config.json",
-            "config.json",
         ]:
             if isdir(save_dir):  # Local
                 resolved_config_file = join(save_dir, quantize_config_filename)
@@ -219,7 +231,11 @@ class BaseQuantizeConfig(PushToHubMixin):
 
             return cls.from_quant_config(args_from_json, checkpoint_format)
 
-    def get_cache_file_path(self, quant_method: QUANT_METHOD = None, checkpoint_format: CHECKPOINT_FORMAT = None):
+    def get_cache_file_path(
+        self,
+        quant_method: QUANT_METHOD = None,
+        checkpoint_format: CHECKPOINT_FORMAT = None,
+    ):
         """
         Gets The Cached Weight Path.
         If remote:   $HF_HOME/assets/autogptq/{model_name_or_path}/_{quant-method}_{checkpoint_format}.safetensors
