@@ -226,10 +226,11 @@ def repack_gptq_to_marlin_24(w_gptq, scales, size_k, size_n, num_bits, group_siz
 
 
 def repack_scales_to_marlin_24(s, num_bits, group_size, size_k, size_n):
-    if group_size == -1:
-        group_size = size_k
+    assert group_size == -1 or group_size == 128 or group_size == size_k
 
-    if group_size != size_k:
+    is_channelwise = group_size == -1 or group_size == size_k
+
+    if not is_channelwise:
         s = s.reshape((-1, len(_scale_perm_2_4[num_bits])))[:, _scale_perm_2_4[num_bits]]
     else:
         s = s.reshape((-1, len(_scale_perm_single_2_4[num_bits])))[:, _scale_perm_single_2_4[num_bits]]

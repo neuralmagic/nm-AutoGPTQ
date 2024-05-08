@@ -277,7 +277,7 @@ def convert_to_marlin_24(
                     )
 
             marlin_24_scales = repack_scales_to_marlin_24(
-                module.scales, quantization_config.bits, module.group_size / 2, module.infeatures, module.outfeatures
+                module.scales, quantization_config.bits, module.group_size, module.infeatures, module.outfeatures
             )
 
             new_module.B_24 = marlin_24_weight
